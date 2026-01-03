@@ -36,9 +36,9 @@ flowchart TD
   %% =========================
   %% Data / windowing
   %% =========================
-  X["Non-supply features\nx: T x Dx"] -->|Rolling window| W["x_past: B x (p+1) x Dx"]
-  X -->|Future supervision (optional)| XF["x_future: B x H x Dx"]
-  Y["Supply targets\ny: T x Dy"] -->|Future targets| YF["y_future: B x H x Dy"]
+  X["Non-supply features | x: T x Dx"] -->|Rolling window| W["x_past: B x (p+1) x Dx"]
+  X -->|Future supervision-optional| XF["x_future: B x H x Dx"]
+  Y["Supply targets | y: T x Dy"] -->|Future targets| YF["y_future: B x H x Dy"]
 
   %% =========================
   %% Stage 1: LAVAR training
@@ -46,40 +46,40 @@ flowchart TD
   subgraph S1[Stage 1 - Train LAVAR]
     direction TB
 
-    W -->|Encode each step| ENC["Encoder MLP\nDx -> k"]
+    W -->|Encode each step| ENC["Encoder MLP | Dx -> k"]
     ENC --> ZSEQ["z_seq: B x (p+1) x k"]
 
-    ZSEQ -->|Use history z_{t-p:t-1}| VAR["VAR(p) dynamics\nA1..Ap"]
+    ZSEQ -->|Use history z_t-p ~ z_t-1| VAR["VAR_p dynamics | A1..Ap"]
     VAR --> ZP["z_pred: B x k"]
 
     ZSEQ -->|Current latent z_t| ZT["z_true: B x k"]
-    ZT --> DEC["Decoder MLP\nk -> Dx"]
+    ZT --> DEC["Decoder MLP | k -> Dx"]
     DEC --> XH["x_hat: B x Dx"]
 
-    XH --> LREC["Reconstruction loss\nMSE(x_hat, x_t)"]
-    ZP --> LDYN["Latent dynamics loss\nMSE(z_pred, z_true)"]
+    XH --> LREC["Reconstruction loss | MSE(x_hat, x_t)"]
+    ZP --> LDYN["Latent dynamics loss | MSE(z_pred, z_true)"]
 
     %% optional multi-step latent supervision
     ZSEQ -->|Optional: encode past p steps| ZH["z_hist: B x p x k"]
     ZH -->|rollout_latent horizon H| ZR["z_roll: B x H x k"]
     XF -->|Encode future steps| ZF["z_fut_true: B x H x k"]
-    ZR --> LMS["Multi-step latent loss\nMSE(z_roll, z_fut_true)"]
+    ZR --> LMS["Multi-step latent loss | MSE(z_roll, z_fut_true)"]
 
     LREC --> SUM1((Weighted sum))
     LDYN --> SUM1
     LMS -.-> SUM1
-    SUM1 --> OPT1["Adam optimizer\nupdates Encoder/Decoder/VAR"]
+    SUM1 --> OPT1["Adam optimizer | updates Encoder/Decoder/VAR"]
   end
 
   %% =========================
   %% Stage 2: Supply head training
   %% =========================
-  subgraph S2[Stage 2 - Train Supply heads (density split)]
+  subgraph S2[Stage 2 - Train Supply heads - density split]
     direction TB
 
     %% Compute per-target density from y_future on TRAIN windows only
     YF -->|nonzero_rate per target| DENS["r_j = mean[ y>0 ]"]
-    DENS --> SPLIT["Split indices:\n- dense (r>=thr)\n- sparse (mid)\n- ultra (r<=thr)"]
+    DENS --> SPLIT["Split indices: dense (r>=thr), sparse (mid), ultra (r<=thr)"]
 
     %% Shared latent rollout (LAVAR frozen in stage 2)
     W -->|Use last p steps as history| HIST["x_hist: B x p x Dx"]
@@ -90,8 +90,8 @@ flowchart TD
     %% Dense + sparse buckets: Δy head trained with MSE (separate model per bucket)
     SPLIT --> D_BKT["Dense bucket: indices J_dense"]
     SPLIT --> S_BKT["Sparse bucket: indices J_sparse"]
-    D_BKT --> DH["SupplyHeadMSE on J_dense\npredict Δy"]
-    S_BKT --> SH["SupplyHeadMSE on J_sparse\npredict Δy"]
+    D_BKT --> DH["SupplyHeadMSE on J_dense -> predict Δy"]
+    S_BKT --> SH["SupplyHeadMSE on J_sparse -> predict Δy"]
     ZFUT --> DH
     ZFUT --> SH
 
@@ -99,20 +99,20 @@ flowchart TD
     Y --> Y0["y0 = y_t (needed for Δy training)"]
     DH --> DDELTA["Δy_hat_dense"]
     SH --> SDELTA["Δy_hat_sparse"]
-    DDELTA --> DINT["Integrate: y_hat = y0 + cumsum(Δy_hat)\nclamp_min(0)"]
-    SDELTA --> SINT["Integrate: y_hat = y0 + cumsum(Δy_hat)\nclamp_min(0)"]
+    DDELTA --> DINT["Integrate: y_hat = y0 + cumsum(Δy_hat) | clamp_min(0)"]
+    SDELTA --> SINT["Integrate: y_hat = y0 + cumsum(Δy_hat) | clamp_min(0)"]
     YF --> DMSE["Dense Δy loss: MSE(Δy_hat, Δy_true)"]
     YF --> SMSE["Sparse Δy loss: MSE(Δy_hat, Δy_true)"]
 
     %% Ultra bucket: ZINB head trained with NLL (separate model)
     SPLIT --> U_BKT["Ultra bucket: indices J_ultra"]
-    U_BKT --> UH["SupplyHeadZINB on J_ultra\npredict (pi,mu,theta)"]
+    U_BKT --> UH["SupplyHeadZINB on J_ultra -> predict (pi,mu,theta)"]
     ZFUT --> UH
     UH --> UPARAMS["(pi, mu, theta)"]
     YF --> UNLL["Ultra loss: ZINB NLL"]
 
     %% All stage-2 optimizers update supply head parameters only; LAVAR is frozen.
-    DMSE --> OPT2["Adam optimizer\nupdates SupplyHead only\n(LAVAR frozen)"]
+    DMSE --> OPT2["Adam optimizer | updates SupplyHead only | (LAVAR frozen)"]
     SMSE --> OPT2
     UNLL --> OPT2
 
