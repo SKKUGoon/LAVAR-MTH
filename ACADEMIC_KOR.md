@@ -1,6 +1,12 @@
-# ACADEMIC NOTES (구현-충실 버전)
+# ACADEMIC NOTES 
 
-이 문서는 이 저장소의 **LAVAR** 모델이 *구현된 그대로* 어떻게 동작하는지 `models.py`, `dynamics.py`, `network.py`, `train_stage1.py`, `train_stage2.py`를 기준으로 설명합니다.
+요약: LAVAR-MTH 는 
+
+1. AutoEncoder 인공신경망을 이용하여 비선형적으로 데이터 $x_t$에 대한 Latent Factor(잠재 변수) $z_t$를 찾아낸 후
+2. $z_t$ 시계열을 선형 시계열 모델인 VAR($p$)로 매핑합니다. 
+3. 이렇게 찾아낸 $x_t ~ z_t$ AutoEncoder를 다양한 다변량 예측 타겟(Multi Target Head, TH)에 접목시켜 Fitting, 예측값 도출
+
+하는 방법으로 작동합니다. 
 
 ## 1) 모델: 무엇을 학습하고 어떻게 사용하는가
 
@@ -23,7 +29,7 @@ $
 z_t = e_\theta(x_t), \qquad \hat{x}_t = d_\phi(z_t)
 $
 
-- **선형 잠재 동역학** (VAR($p$)):
+- **선형 잠재 시계열** (VAR($p$)):
 
 $
 \hat{z}_t
@@ -40,15 +46,13 @@ $
 
 ## 2) “잠재 변수는 어떻게 찾는가?”
 
-이 코드베이스는 변분 사후(variational posterior)나 확률적 잠재 샘플링을 구현하지 않습니다.
-
 잠재 상태는 인코더 네트워크에 의해 **결정론적으로** 계산됩니다:
 
 $
 z_t = e_\theta(x_t)
 $
 
-학습(스테이지 1) 동안, 윈도우 내 각 시점은 **독립적으로** 인코딩되며, 시간적 구조는 명시적인 잠재-동역학 손실(§3 참조)을 통해 강제됩니다.
+학습(스테이지 1) 동안, 윈도우 내 각 시점은 **독립적으로** 인코딩됩니다
 
 구현 디테일: 인코더는 $x$에서 정확히 0인 값들을 작은 $\varepsilon$로 치환합니다(다운스트림 연산에서 죽은 그래디언트(dead gradients)를 피하기 위함):
 
@@ -112,7 +116,7 @@ $
   = \| \hat{x}_t - x_t \|_2^2
 $
 
-- **1-스텝 잠재 동역학 손실**:
+- **1-스텝 Latent Factor VAR 손실**:
 
 $
 \mathcal{L}_{\text{dyn}}
@@ -120,7 +124,7 @@ $
 $
 
 - **선택적 다중-스텝 잠재 감독** (`cfg.multi_step_latent_supervision=True`):
-  - 과거 잠재들로부터 $H$ 스텝 앞까지 잠재 동역학을 롤아웃(roll out)합니다:
+  - 과거 잠재들로부터 $H$ 스텝 앞까지 Latent Factor VAR Fitting 값을 롤아웃(roll out)합니다:
 
 $
 \hat{z}_{t+1:t+H} = \text{rollout}([z_{t-p+1},\dots,z_t], H)
@@ -142,10 +146,7 @@ $
 전체적으로(정확한 가중치는 `train_stage1.py`와 일치):
 
 $
-\mathcal{L}_{\text{stage1}}
-  = \lambda_{\text{recon}}\mathcal{L}_{\text{recon}}
-  + \lambda_{\text{dyn}}\mathcal{L}_{\text{dyn}}
-  + \lambda_{\text{dyn}}\mathcal{L}_{\text{ms}} \;\; (\text{if enabled})
+\mathcal{L}_{\text{stage1}} = \lambda_{\text{recon}}\mathcal{L}_{\text{recon}} + \lambda_{\text{dyn}}\mathcal{L}_{\text{dyn}} + \lambda_{\text{dyn}}\mathcal{L}_{\text{ms}} \;\; (\text{if enabled})
 $
 
 ## 4) 스테이지 2: “공급(supplies)은 어떻게 찾는가?”
